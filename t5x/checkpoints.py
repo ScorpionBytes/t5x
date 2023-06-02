@@ -34,6 +34,7 @@ import os
 import re
 import subprocess
 import time
+import typing
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple, Union
 
 from absl import logging
@@ -60,9 +61,7 @@ import tensorflow as tf
 from tensorflow.io import gfile
 import tensorstore as ts
 import typing_extensions
-from tensorboard.backend.event_processing import directory_watcher
-from tensorboard.backend.event_processing import event_file_loader
-from tensorboard.backend.event_processing import io_wrapper
+
 
 PartitionSpec = partitioning.PartitionSpec
 PyTree = Any
@@ -1981,7 +1980,15 @@ def _construct_orbax_restoration_transforms(
   )
   assert state_subdir.is_dir()
   use_orbax_format = state_subdir.stem == _STATE_KEY  # Standard Orbax format
-  structure = manager._checkpointers[_STATE_KEY].structure(state_subdir)  # pylint: disable=protected-access
+  checkpointer = typing.cast(
+      orbax.checkpoint.Checkpointer, manager._checkpointers[_STATE_KEY]  # pylint: disable=protected-access
+  )
+  handler = typing.cast(
+      orbax.checkpoint.PyTreeCheckpointHandler, checkpointer._handler  # pylint: disable=protected-access
+  )
+  structure = handler._read_aggregate_file(  # pylint: disable=protected-access
+      state_subdir
+  )
   # Note: Ideally we would use Orbax's `transform_fn` to do this logic, but
   # the problem is we need to modify `restore_args`, and there isn't a great
   # way to do that within Orbax.
@@ -2010,9 +2017,11 @@ def _construct_orbax_restoration_transforms(
     # This structure is unneeded, because we already restored and transformed
     # it.
     del structure
+    del param_infos
     # Construct param_infos from item because item is the transformed
     # structure.
     # pylint: disable=protected-access
+    logging.info(item)
     param_infos = orbax.checkpoint.pytree_checkpoint_handler._get_param_infos_from_structure(
         manager._get_save_directory(step, directory, key_name=_STATE_KEY), item
     )
